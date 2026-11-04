@@ -1,0 +1,198 @@
+package com.example
+
+import android.os.Build
+import android.os.Bundle
+import androidx.activity.ComponentActivity
+import androidx.activity.compose.BackHandler
+import androidx.activity.compose.setContent
+import androidx.activity.enableEdgeToEdge
+import androidx.activity.viewModels
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.togetherWith
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.getValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.example.ui.MainViewModel
+import com.example.ui.Screen
+import com.example.ui.components.PillNavigationBar
+import com.example.ui.screens.HomeScreen
+import com.example.ui.screens.LibraryScreen
+import com.example.ui.screens.MovieDetailSheet
+import com.example.ui.screens.ProfileDialog
+import com.example.ui.screens.SearchScreen
+import com.example.ui.theme.MoviesAndSeriesTheme
+
+class MainActivity : ComponentActivity() {
+    private val viewModel: MainViewModel by viewModels()
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        enableEdgeToEdge()
+        window.setFlags(
+            android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED,
+            android.view.WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED
+        )
+
+        try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+                val currentDisplay = display
+                val modes = currentDisplay?.supportedModes
+                val maxRefreshMode = modes?.maxByOrNull { it.refreshRate }
+                if (maxRefreshMode != null && maxRefreshMode.refreshRate >= 90f) {
+                    val params = window.attributes
+                    params.preferredDisplayModeId = maxRefreshMode.modeId
+                    window.attributes = params
+                }
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                val params = window.attributes
+                params.preferredRefreshRate = 120f
+                window.attributes = params
+            }
+        } catch (_: Exception) {
+            // Fallback
+        }
+
+        setContent {
+            StreamingApp(viewModel = viewModel)
+        }
+    }
+}
+
+@Composable
+fun StreamingApp(viewModel: MainViewModel) {
+    val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
+    val homeState by viewModel.homeState.collectAsStateWithLifecycle()
+    val searchQuery by viewModel.searchQuery.collectAsStateWithLifecycle()
+    val searchResults by viewModel.searchResults.collectAsStateWithLifecycle()
+    val isSearching by viewModel.isSearching.collectAsStateWithLifecycle()
+    val searchType by viewModel.searchType.collectAsStateWithLifecycle()
+    val savedMedia by viewModel.savedMedia.collectAsStateWithLifecycle()
+    val detailState by viewModel.detailState.collectAsStateWithLifecycle()
+    val isProfileOpen by viewModel.isProfileOpen.collectAsStateWithLifecycle()
+    val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
+    MoviesAndSeriesTheme(accentColorHex = userProfile.accentColorHex) {
+        BackHandler(enabled = currentScreen !is Screen.Home && detailState.meta == null && !isProfileOpen) {
+            viewModel.navigateTo(Screen.Home)
+        }
+
+        Box(
+            modifier = Modifier
+                .fillMaxSize()
+                .background(MaterialTheme.colorScheme.background)
+        ) {
+            AnimatedContent(
+                targetState = currentScreen,
+                transitionSpec = {
+                    fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy)) togetherWith
+                            fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy))
+                },
+                label = "screen_navigation"
+            ) { screen ->
+                when (screen) {
+                    is Screen.Home -> {
+                        HomeScreen(
+                            homeState = homeState,
+                            userProfile = userProfile,
+                            onOpenProfile = { viewModel.openProfile() },
+                            onOpenSearch = { viewModel.navigateTo(Screen.Search) },
+                            onRefresh = { viewModel.loadCatalogData() },
+                            onSelectHeroIndex = { viewModel.setHeroIndex(it) },
+                            onSelectPlatformFilter = { viewModel.filterPlatform(it) },
+                            onClickMovie = { viewModel.openMovieDetail(it) }
+                        )
+                    }
+
+                    is Screen.Search -> {
+                        SearchScreen(
+                            searchQuery = searchQuery,
+                            searchResults = searchResults,
+                            isSearching = isSearching,
+                            selectedType = searchType,
+                            onTypeSelected = { viewModel.setSearchType(it) },
+                            onQueryChanged = { viewModel.onSearchQueryChanged(it) },
+                            onClickMovie = { viewModel.openMovieDetail(it) }
+                        )
+                    }
+
+                    is Screen.Library -> {
+                        LibraryScreen(
+                            savedItems = savedMedia,
+                            sortOrder = userProfile.librarySortOrder,
+                            onSortOrderSelected = { viewModel.setLibrarySortOrder(it) },
+                            selectedTileSize = userProfile.libraryTileSize,
+                            onTileSizeSelected = { viewModel.setLibraryTileSize(it) },
+                            onMoveItem = { from, to -> viewModel.moveSavedItem(from, to) },
+                            onCommitReorder = { viewModel.reorderSavedItems(it) },
+                            onSaveLayoutAndOrder = { viewModel.saveLibraryLayoutAndOrder() },
+                            onDeleteItem = { viewModel.deleteSavedItem(it) },
+                            onClickMovie = { viewModel.openMovieDetail(it) },
+                            onAddCustomMediaWithMap = { title, type, poster, backdrop, year, rating, desc, genres, seasons, perSeasonMap ->
+                                viewModel.saveCustomMedia(title, type, poster, backdrop, year, rating, desc, genres, seasons, perSeasonMap)
+                            }
+                        )
+                    }
+                }
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = detailState.meta == null && !(homeState.isLoading && homeState.categories.isEmpty()),
+                enter = fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMedium)),
+                exit = fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMedium)),
+                modifier = Modifier.align(Alignment.BottomCenter)
+            ) {
+                PillNavigationBar(
+                    currentScreen = currentScreen,
+                    onNavigate = { viewModel.navigateTo(it) }
+                )
+            }
+
+            androidx.compose.animation.AnimatedVisibility(
+                visible = detailState.meta != null,
+                enter = androidx.compose.animation.slideInVertically(
+                    initialOffsetY = { it },
+                    animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy)
+                ) + fadeIn(animationSpec = spring(stiffness = Spring.StiffnessMedium)),
+                exit = androidx.compose.animation.slideOutVertically(
+                    targetOffsetY = { it },
+                    animationSpec = spring(stiffness = Spring.StiffnessMedium, dampingRatio = Spring.DampingRatioNoBouncy)
+                ) + fadeOut(animationSpec = spring(stiffness = Spring.StiffnessMedium))
+            ) {
+                MovieDetailSheet(
+                    detailState = detailState,
+                    onClose = { viewModel.closeMovieDetail() },
+                    onToggleSave = { viewModel.toggleSaveMovie(it) },
+                    onToggleMute = { viewModel.toggleTrailerMute() },
+                    onSelectQuality = { viewModel.setQualityFilter(it) },
+                    onSelectProvider = { viewModel.setProviderFilter(it) },
+                    onSelectSeason = { viewModel.selectSeason(it) },
+                    onSelectEpisode = { viewModel.selectEpisode(it) },
+                    onAddCustomStream = { viewModel.addCustomStream(it) },
+                    onRemoveStream = { viewModel.removeStream(it) },
+                    onSaveCustomEdits = { streams, meta ->
+                        viewModel.repository.saveCustomStreamEdits(meta.id, streams)
+                        viewModel.repository.saveCustomMetaEdits(meta)
+                    },
+                    showDebugLine = userProfile.showTrailerDebug
+                )
+            }
+
+            if (isProfileOpen) {
+                ProfileDialog(
+                    userProfile = userProfile,
+                    preferences = viewModel.preferences,
+                    onDismiss = { viewModel.closeProfile() }
+                )
+            }
+        }
+    }
+}
