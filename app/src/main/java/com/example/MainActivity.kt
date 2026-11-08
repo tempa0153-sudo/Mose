@@ -79,9 +79,10 @@ fun StreamingApp(viewModel: MainViewModel) {
     val savedMedia by viewModel.savedMedia.collectAsStateWithLifecycle()
     val detailState by viewModel.detailState.collectAsStateWithLifecycle()
     val isProfileOpen by viewModel.isProfileOpen.collectAsStateWithLifecycle()
+    val isHomeEditMode by viewModel.isHomeEditMode.collectAsStateWithLifecycle()
     val userProfile by viewModel.userProfile.collectAsStateWithLifecycle()
     MoviesAndSeriesTheme(accentColorHex = userProfile.accentColorHex) {
-        BackHandler(enabled = currentScreen !is Screen.Home && detailState.meta == null && !isProfileOpen) {
+        BackHandler(enabled = currentScreen !is Screen.Home && detailState.meta == null && !isProfileOpen && !isHomeEditMode) {
             viewModel.navigateTo(Screen.Home)
         }
 
@@ -108,7 +109,18 @@ fun StreamingApp(viewModel: MainViewModel) {
                             onRefresh = { viewModel.loadCatalogData() },
                             onSelectHeroIndex = { viewModel.setHeroIndex(it) },
                             onSelectPlatformFilter = { viewModel.filterPlatform(it) },
-                            onClickMovie = { viewModel.openMovieDetail(it) }
+                            onClickMovie = { viewModel.openMovieDetail(it) },
+                            isHomeEditMode = isHomeEditMode,
+                            onSaveHomeCustomizations = { viewModel.saveHomeCustomizations() },
+                            onRestoreHomeOriginal = { viewModel.restoreHomeOriginal() },
+                            onExitHomeEditMode = { viewModel.setHomeEditMode(false) },
+                            onMoveCategoryMovie = { catId, from, to -> viewModel.moveCategoryMovie(catId, from, to) },
+                            onDeleteCategoryMovie = { catId, movieId -> viewModel.deleteCategoryMovie(catId, movieId) },
+                            onAddCategoryMovie = { catId, movie -> viewModel.addCategoryMovie(catId, movie) },
+                            onEditCategoryMovie = { catId, movieId, movie -> viewModel.editCategoryMovie(catId, movieId, movie) },
+                            onShuffleCategory = { catId -> viewModel.shuffleCategoryMovies(catId) },
+                            onUpdateHeroMovies = { heroes -> viewModel.updateHeroMovies(heroes) },
+                            onUpdateHeroCustomImage = { hero, newUrl -> viewModel.updateHeroMovieImage(hero, newUrl) }
                         )
                     }
 
@@ -177,10 +189,18 @@ fun StreamingApp(viewModel: MainViewModel) {
                     onSelectSeason = { viewModel.selectSeason(it) },
                     onSelectEpisode = { viewModel.selectEpisode(it) },
                     onAddCustomStream = { viewModel.addCustomStream(it) },
-                    onRemoveStream = { viewModel.removeStream(it) },
+                    onRemoveStream = { s, targetId -> viewModel.removeStream(s, targetId) },
+                    onSaveEpisodeStreams = { epId, streams -> viewModel.saveEpisodeStreams(epId, streams) },
                     onSaveCustomEdits = { streams, meta ->
-                        viewModel.repository.saveCustomStreamEdits(meta.id, streams)
-                        viewModel.repository.saveCustomMetaEdits(meta)
+                        viewModel.saveCustomEdits(streams, meta)
+                    },
+                    onSaveCustomEditsWithSlideshow = { streams, meta, slideshow ->
+                        viewModel.saveCustomEdits(streams, meta, slideshow)
+                    },
+                    onRestoreOriginal = {
+                        detailState.meta?.let { m ->
+                            viewModel.restoreMovieOriginal(m.id, m.displayImdbId)
+                        }
                     },
                     showDebugLine = userProfile.showTrailerDebug
                 )
@@ -190,7 +210,8 @@ fun StreamingApp(viewModel: MainViewModel) {
                 ProfileDialog(
                     userProfile = userProfile,
                     preferences = viewModel.preferences,
-                    onDismiss = { viewModel.closeProfile() }
+                    onDismiss = { viewModel.closeProfile() },
+                    onEnterHomeEditMode = { viewModel.setHomeEditMode(true) }
                 )
             }
         }

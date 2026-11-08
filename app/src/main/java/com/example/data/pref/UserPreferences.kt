@@ -136,4 +136,78 @@ class UserPreferences(context: Context) {
             youtubeAccountName = accountName
         )
     }
+
+    fun saveCustomMeta(id: String, jsonStr: String) {
+        prefs.edit().putString("custom_meta_$id", jsonStr).apply()
+    }
+
+    fun getCustomMeta(id: String): String? {
+        return prefs.getString("custom_meta_$id", null)
+    }
+
+    fun saveCustomStreams(id: String, jsonStr: String) {
+        prefs.edit().putString("custom_streams_$id", jsonStr).apply()
+    }
+
+    fun getCustomStreams(id: String): String? {
+        return prefs.getString("custom_streams_$id", null)
+    }
+
+    fun saveCustomSlideshow(id: String, jsonStr: String) {
+        prefs.edit().putString("custom_slideshow_$id", jsonStr).apply()
+    }
+
+    fun getCustomSlideshow(id: String): String? {
+        return prefs.getString("custom_slideshow_$id", null)
+    }
+
+    fun hideStream(id: String, streamKey: String) {
+        val set = prefs.getStringSet("hidden_streams_$id", emptySet())?.toMutableSet() ?: mutableSetOf()
+        set.add(streamKey)
+        prefs.edit().putStringSet("hidden_streams_$id", set).apply()
+    }
+
+    fun getHiddenStreams(id: String): Set<String> {
+        return prefs.getStringSet("hidden_streams_$id", emptySet()) ?: emptySet()
+    }
+
+    fun clearCustomStreams(id: String) {
+        prefs.edit().remove("custom_streams_$id").apply()
+    }
+
+    fun clearCustomMeta(id: String) {
+        prefs.edit().remove("custom_meta_$id").apply()
+    }
+
+    fun clearCustomSlideshow(id: String) {
+        prefs.edit().remove("custom_slideshow_$id").apply()
+    }
+
+    fun clearHiddenStreams(id: String) {
+        prefs.edit().remove("hidden_streams_$id").apply()
+    }
+
+    fun saveCustomHomeCategories(jsonStr: String) {
+        prefs.edit().putString("custom_home_categories", jsonStr).apply()
+    }
+
+    fun clearCustomHomeCategories() {
+        prefs.edit().remove("custom_home_categories").apply()
+    }
+
+    fun getCustomHomeCategories(): String? {
+        return prefs.getString("custom_home_categories", null)
+    }
+
+    fun saveCustomHomeHeroes(jsonStr: String) {
+        prefs.edit().putString("custom_home_heroes", jsonStr).apply()
+    }
+
+    fun clearCustomHomeHeroes() {
+        prefs.edit().remove("custom_home_heroes").apply()
+    }
+
+    fun getCustomHomeHeroes(): String? {
+        return prefs.getString("custom_home_heroes", null)
+    }
 }

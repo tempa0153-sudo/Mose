@@ -24,14 +24,21 @@ fun resolveCoilData(context: Context, model: Any?): Any? {
     return str
 }
 
-fun buildOptimizedImageRequest(context: Context, data: Any?, width: Int = 360, height: Int = 540): ImageRequest {
+fun buildOptimizedImageRequest(
+    context: Context,
+    data: Any?,
+    width: Int = 220,
+    height: Int = 330,
+    enableCrossfade: Boolean = false
+): ImageRequest {
     val resolved = resolveCoilData(context, data)
     return ImageRequest.Builder(context)
         .data(resolved)
         .size(width, height)
         .precision(coil.size.Precision.INEXACT)
         .allowRgb565(true)
-        .crossfade(false)
+        .allowHardware(true)
+        .crossfade(enableCrossfade)
         .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
         .diskCachePolicy(coil.request.CachePolicy.ENABLED)
         .build()

@@ -65,6 +65,7 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -92,41 +93,23 @@ import com.example.ui.theme.CinemaRed
 import com.example.ui.theme.ImdbGold
 
 fun sanitizeStreamText(raw: String?): String? {
-    if (raw.isNullOrBlank()) return raw
     return raw
-        .replace("PixelDrain", "Provider 1 Addon", ignoreCase = true)
-        .replace("Pixel Drain", "Provider 1 Addon", ignoreCase = true)
-        .replace("PixelD", "Provider 1 Addon", ignoreCase = true)
-        .replace("HLS Stream", "Provider 1 Addon", ignoreCase = true)
-        .replace("HLS stream", "Provider 1 Addon", ignoreCase = true)
-        .replace("HLSstream", "Provider 1 Addon", ignoreCase = true)
-        .replace("HLS", "Provider 1 Addon", ignoreCase = true)
-        .replace("4KHDHub", "Provider 1 Addon", ignoreCase = true)
-        .replace("HDHub4u", "Provider 1 Addon", ignoreCase = true)
-        .replace("PenguPlay", "Provider 2 Addon", ignoreCase = true)
-        .replace("VegaMovies", "Provider 2 Addon", ignoreCase = true)
-        .replace("MoviesDrive", "Provider 2 Addon", ignoreCase = true)
 }
 
 fun formatProviderDisplay(raw: String?): String {
-    if (raw.isNullOrBlank()) return "Provider 1 Addon"
-    val cleaned = raw.replace("HLS Stream", "Provider 1 Addon", ignoreCase = true)
-        .replace("HLS stream", "Provider 1 Addon", ignoreCase = true)
-        .replace("HLSstream", "Provider 1 Addon", ignoreCase = true)
-        .replace("HLS", "Provider 1 Addon", ignoreCase = true)
-        .replace("PixelDrain", "Provider 1 Addon", ignoreCase = true)
-        .replace("Pixel Drain", "Provider 1 Addon", ignoreCase = true)
-        .replace("PixelD", "Provider 1 Addon", ignoreCase = true)
-        .replace("4KHDHub", "Provider 1 Addon", ignoreCase = true)
+    if (raw.isNullOrBlank()) return "HD Hub"
+    val lower = raw.lowercase()
     return when {
-        cleaned.contains("Provider 1 Addon", ignoreCase = true) -> "Provider 1 Addon"
-        cleaned.contains("Provider 2 Addon", ignoreCase = true) -> "Provider 2 Addon"
-        cleaned.equals("HDHub4u", ignoreCase = true) || cleaned.equals("hdhub", ignoreCase = true) -> "Provider 1"
-        cleaned.equals("PenguPlay", ignoreCase = true) || cleaned.equals("pengu", ignoreCase = true) -> "Provider 2"
-        cleaned.contains("2Peckle", ignoreCase = true) || cleaned.contains("MovieBox", ignoreCase = true) || cleaned.contains("VegaMovies", ignoreCase = true) || cleaned.contains("MoviesDrive", ignoreCase = true) -> "Provider 2 Addon"
-        else -> if (!cleaned.contains("Provider", ignoreCase = true)) "$cleaned Addon" else cleaned
+        lower.contains("pengu") || lower.contains("pingu") || lower.contains("provider 2") -> "PenguPlay"
+        lower.contains("yas") || lower.contains("provider 3") -> "YAS Stream"
+        else -> "HD Hub"
     }
 }
+
+data class StreamBadgePair(
+    val providerName: String,
+    val addonName: String
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -140,8 +123,11 @@ fun MovieDetailSheet(
     onSelectSeason: (Int) -> Unit = {},
     onSelectEpisode: (EpisodeItem) -> Unit = {},
     onAddCustomStream: (StremioStream) -> Unit = {},
-    onRemoveStream: (StremioStream) -> Unit = {},
+    onRemoveStream: (StremioStream, String?) -> Unit = { _, _ -> },
+    onSaveEpisodeStreams: (String, List<StremioStream>) -> Unit = { _, _ -> },
     onSaveCustomEdits: (List<StremioStream>, StremioCatalogMeta) -> Unit = { _, _ -> },
+    onSaveCustomEditsWithSlideshow: (List<StremioStream>, StremioCatalogMeta, List<String>?) -> Unit = { _, _, _ -> },
+    onRestoreOriginal: () -> Unit = {},
     showDebugLine: Boolean = false,
     modifier: Modifier = Modifier
 ) {
@@ -158,7 +144,23 @@ fun MovieDetailSheet(
         val list = mutableListOf<String>()
         meta.poster?.takeIf { it.isNotBlank() }?.let { list.add(it) }
         meta.background?.takeIf { it.isNotBlank() }?.let { list.add(it) }
+        meta.logo?.takeIf { it.isNotBlank() }?.let { list.add(it) }
         meta.videos?.mapNotNull { it.thumbnail }?.filter { it.isNotBlank() }?.let { list.addAll(it) }
+
+        val cleanImdb = meta.displayImdbId.trim()
+        if (cleanImdb.startsWith("tt")) {
+            list.add("https://images.metahub.space/background/medium/$cleanImdb/img")
+            list.add("https://images.metahub.space/logo/medium/$cleanImdb/img")
+            list.add("https://images.metahub.space/poster/medium/$cleanImdb/img")
+        }
+        val defaultHdBackdrops = listOf(
+            "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=1200",
+            "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=1200",
+            "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?q=80&w=1200"
+        )
+        for (fallback in defaultHdBackdrops) {
+            if (list.size < 5) list.add(fallback)
+        }
         list.distinct().toMutableList()
     }
     var localSlideshowList by remember(meta) { mutableStateOf(initialSlideshowList) }
@@ -189,16 +191,7 @@ fun MovieDetailSheet(
 
     val availableQualities = listOf("All Qualities", "4K 2160p", "1080p FHD", "720p HD")
     val filteredStreams = remember(detailState.streams, detailState.selectedQualityFilter, detailState.selectedProviderFilter) {
-        val sanitized = detailState.streams.map { stream ->
-            stream.copy(
-                name = sanitizeStreamText(stream.name) ?: stream.name,
-                title = sanitizeStreamText(stream.title) ?: stream.title,
-                description = sanitizeStreamText(stream.description) ?: stream.description,
-                addonSource = formatProviderDisplay(stream.addonSource),
-                subProvider = sanitizeStreamText(stream.subProvider)
-            )
-        }
-        val initialFiltered = sanitized
+        val initialFiltered = detailState.streams
             .filterNot { it.isBelow720p }
             .filter { stream ->
                 val matchesQuality = if (detailState.selectedQualityFilter == "All" || detailState.selectedQualityFilter == "All Qualities") true
@@ -207,52 +200,15 @@ fun MovieDetailSheet(
                 val selectedP = detailState.selectedProviderFilter
                 val matchesProvider = when {
                     selectedP == "All" || selectedP == "All Providers" || selectedP == "All Streamers" -> true
-                    selectedP.equals("HDHub4u", ignoreCase = true) || selectedP.equals("Provider 1", ignoreCase = true) ->
-                        stream.streamerNumber == 1 || stream.addonSource.contains("Provider 1", ignoreCase = true)
-                    selectedP.equals("PenguPlay", ignoreCase = true) || selectedP.equals("Provider 2", ignoreCase = true) ->
-                        stream.streamerNumber == 2 || stream.addonSource.contains("Provider 2", ignoreCase = true)
+                    selectedP.contains("Provider 1", ignoreCase = true) || selectedP.contains("HD Hub", ignoreCase = true) -> stream.streamerNumber == 1
+                    selectedP.contains("Provider 2", ignoreCase = true) || selectedP.contains("Pengu", ignoreCase = true) || selectedP.contains("Pingu", ignoreCase = true) -> stream.streamerNumber == 2
+                    selectedP.contains("Provider 3", ignoreCase = true) || selectedP.contains("YAS", ignoreCase = true) -> stream.streamerNumber == 3
                     else -> true
                 }
                 matchesQuality && matchesProvider
             }
 
-        val hasProvider1 = initialFiltered.any { it.streamerNumber == 1 || it.addonSource.contains("Provider 1", ignoreCase = true) }
-        val hasProvider2 = initialFiltered.any { it.streamerNumber == 2 || it.addonSource.contains("Provider 2", ignoreCase = true) }
-
-        val resultList = initialFiltered.toMutableList()
-
-        if (!hasProvider1) {
-            val fallbackUrl = initialFiltered.firstOrNull()?.playableUrl ?: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/BigBuckBunny.mp4"
-            resultList.add(
-                0,
-                StremioStream(
-                    name = "Provider 1",
-                    title = "Direct Stream Link • 1080p FHD",
-                    url = fallbackUrl,
-                    streamerNumber = 1,
-                    addonSource = "Provider 1 Addon",
-                    subProvider = "Provider 1 Addon",
-                    description = "Direct Stream & Download Link • 1080p FHD"
-                )
-            )
-        }
-
-        if (!hasProvider2) {
-            val fallbackUrl = initialFiltered.firstOrNull { it.streamerNumber == 2 }?.playableUrl ?: initialFiltered.firstOrNull()?.playableUrl ?: "https://commondatastorage.googleapis.com/gtv-videos-bucket/sample/ElephantsDream.mp4"
-            resultList.add(
-                StremioStream(
-                    name = "Provider 2",
-                    title = "Fast Direct Server Link • 720p HD",
-                    url = fallbackUrl,
-                    streamerNumber = 2,
-                    addonSource = "Provider 2 Addon",
-                    subProvider = "Provider 2 Addon",
-                    description = "Fast Server Provider 2 Stream Link • 720p HD"
-                )
-            )
-        }
-
-        resultList.sortedWith(
+        initialFiltered.sortedWith(
             compareBy<StremioStream> { it.streamerNumber }
                 .thenByDescending { stream ->
                     when {
@@ -265,23 +221,19 @@ fun MovieDetailSheet(
         )
     }
 
-    var localStreamsList by remember(filteredStreams) { mutableStateOf(filteredStreams.toMutableList()) }
+    var hasUserEditedStreams by remember(detailState.selectedEpisode?.id ?: meta.id) { mutableStateOf(false) }
+    var localStreamsList by remember(detailState.selectedEpisode?.id ?: meta.id) { mutableStateOf(filteredStreams.toMutableList()) }
 
-    // Compute sequential badge numbers per provider (Provider 1 #1, #2... Provider 2 #1, #2...)
-    val streamBadgeLabels = remember(localStreamsList) {
-        var p1Count = 0
-        var p2Count = 0
-        localStreamsList.map { stream ->
-            val isP1 = stream.streamerNumber == 1 || stream.addonSource?.contains("HDHub", ignoreCase = true) == true || stream.addonSource?.contains("Provider 1", ignoreCase = true) == true
-            if (isP1) {
-                p1Count++
-                "#$p1Count"
-            } else {
-                p2Count++
-                "#$p2Count"
-            }
+    LaunchedEffect(filteredStreams) {
+        if (!isEditingProviders && !hasUserEditedStreams) {
+            localStreamsList = filteredStreams.toMutableList()
         }
     }
+    var verificationUrl by remember { mutableStateOf<String?>(null) }
+
+    val p1Streams = remember(localStreamsList) { localStreamsList.filter { it.streamerNumber == 1 } }
+    val p2Streams = remember(localStreamsList) { localStreamsList.filter { it.streamerNumber == 2 } }
+    val p3Streams = remember(localStreamsList) { localStreamsList.filter { it.streamerNumber == 3 } }
 
     Surface(
         modifier = modifier.fillMaxSize(),
@@ -300,11 +252,27 @@ fun MovieDetailSheet(
                     item {
                         val epImages = remember(ep, meta) {
                             val list = mutableListOf<String>()
-                            meta.poster?.takeIf { it.isNotBlank() }?.let { list.add(it) }
                             ep.thumbnail?.takeIf { it.isNotBlank() }?.let { list.add(it) }
                             meta.background?.takeIf { it.isNotBlank() }?.let { list.add(it) }
+                            meta.poster?.takeIf { it.isNotBlank() }?.let { list.add(it) }
+                            val cleanImdb = meta.displayImdbId.trim()
+                            if (cleanImdb.startsWith("tt")) {
+                                list.add("https://images.metahub.space/background/medium/$cleanImdb/img")
+                                list.add("https://images.metahub.space/poster/medium/$cleanImdb/img")
+                                list.add("https://images.metahub.space/logo/medium/$cleanImdb/img")
+                            }
                             meta.videos?.mapNotNull { it.thumbnail }?.filter { it.isNotBlank() }?.let { list.addAll(it) }
-                            list.distinct().take(8)
+                            val defaultHdBackdrops = listOf(
+                                "https://images.unsplash.com/photo-1536440136628-849c177e76a1?q=80&w=1200",
+                                "https://images.unsplash.com/photo-1489599849927-2ee91cede3ba?q=80&w=1200",
+                                "https://images.unsplash.com/photo-1574375927938-d5a98e8ffe85?q=80&w=1200",
+                                "https://images.unsplash.com/photo-1517604931442-7e0c8ed2963c?q=80&w=1200",
+                                "https://images.unsplash.com/photo-1594909122845-11baa439b7bf?q=80&w=1200"
+                            )
+                            for (fallback in defaultHdBackdrops) {
+                                if (list.size < 5) list.add(fallback)
+                            }
+                            list.distinct()
                         }
                         MediaSlideshowView(
                             images = (epImages + localSlideshowList).distinct(),
@@ -443,59 +411,134 @@ fun MovieDetailSheet(
                         }
                     }
 
-                    // Streams list for Episode
-                    if (detailState.isLoadingStreams && detailState.streams.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .height(100.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 2.5.dp)
-                            }
-                        }
-                    } else if (localStreamsList.isEmpty()) {
-                        item {
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(24.dp),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text("No direct stream links found for this episode.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                            }
-                        }
-                    } else {
-                        itemsIndexed(
-                            items = localStreamsList,
-                            key = { idx, stream -> "${stream.streamerNumber}_${stream.name}_${stream.title}_$idx" }
-                        ) { idx, stream ->
-                            StreamSourceItemCard(
-                                stream = stream,
-                                badgeLabel = streamBadgeLabels.getOrElse(idx) { "" },
-                                title = "${meta.name} S${ep.season}E${ep.number}",
-                                context = context,
-                                isEditingProviders = isEditingProviders,
-                                canMoveUp = idx > 0,
-                                canMoveDown = idx < localStreamsList.size - 1,
-                                onMoveUp = {
-                                    val list = localStreamsList.toMutableList()
+                    // Three Provider Categories for Episode (vanishes when empty unless in edit mode)
+                    if (p1Streams.isNotEmpty() || isEditingProviders) {
+                        renderProviderSection(
+                            categoryTitle = "Provider 1",
+                            streams = p1Streams,
+                            allStreams = localStreamsList,
+                            isLoading = detailState.isLoadingStreams,
+                            titleText = "${meta.name} S${ep.season}E${ep.number}",
+                            context = context,
+                            isEditingProviders = isEditingProviders,
+                            onMoveUp = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx > 0) {
                                     val temp = list[idx]
                                     list[idx] = list[idx - 1]
                                     list[idx - 1] = temp
                                     localStreamsList = list
-                                },
-                                onMoveDown = {
-                                    val list = localStreamsList.toMutableList()
+                                    onSaveEpisodeStreams(ep.id, list)
+                                    onSaveCustomEdits(list, meta)
+                                }
+                            },
+                            onMoveDown = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx >= 0 && idx < list.size - 1) {
                                     val temp = list[idx]
                                     list[idx] = list[idx + 1]
                                     list[idx + 1] = temp
                                     localStreamsList = list
-                                },
-                                onRemoveStream = onRemoveStream
-                            )
-                        }
+                                    onSaveEpisodeStreams(ep.id, list)
+                                    onSaveCustomEdits(list, meta)
+                                }
+                            },
+                            onRemoveStream = { s ->
+                                localStreamsList = localStreamsList.filter { it != s }.toMutableList()
+                                onRemoveStream(s, ep.id)
+                                onSaveEpisodeStreams(ep.id, localStreamsList)
+                                onSaveCustomEdits(localStreamsList, meta)
+                            },
+                            onOpenVerification = { url -> verificationUrl = url }
+                        )
+                    }
+
+                    if (p2Streams.isNotEmpty() || isEditingProviders) {
+                        renderProviderSection(
+                            categoryTitle = "Provider 2",
+                            streams = p2Streams,
+                            allStreams = localStreamsList,
+                            isLoading = detailState.isLoadingStreams,
+                            titleText = "${meta.name} S${ep.season}E${ep.number}",
+                            context = context,
+                            isEditingProviders = isEditingProviders,
+                            onMoveUp = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx > 0) {
+                                    val temp = list[idx]
+                                    list[idx] = list[idx - 1]
+                                    list[idx - 1] = temp
+                                    localStreamsList = list
+                                    onSaveEpisodeStreams(ep.id, list)
+                                    onSaveCustomEdits(list, meta)
+                                }
+                            },
+                            onMoveDown = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx >= 0 && idx < list.size - 1) {
+                                    val temp = list[idx]
+                                    list[idx] = list[idx + 1]
+                                    list[idx + 1] = temp
+                                    localStreamsList = list
+                                    onSaveEpisodeStreams(ep.id, list)
+                                    onSaveCustomEdits(list, meta)
+                                }
+                            },
+                            onRemoveStream = { s ->
+                                localStreamsList = localStreamsList.filter { it != s }.toMutableList()
+                                onRemoveStream(s, ep.id)
+                                onSaveEpisodeStreams(ep.id, localStreamsList)
+                                onSaveCustomEdits(localStreamsList, meta)
+                            },
+                            onOpenVerification = { url -> verificationUrl = url }
+                        )
+                    }
+
+                    if (p3Streams.isNotEmpty() || isEditingProviders) {
+                        renderProviderSection(
+                            categoryTitle = "Provider 3",
+                            streams = p3Streams,
+                            allStreams = localStreamsList,
+                            isLoading = detailState.isLoadingStreams,
+                            titleText = "${meta.name} S${ep.season}E${ep.number}",
+                            context = context,
+                            isEditingProviders = isEditingProviders,
+                            onMoveUp = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx > 0) {
+                                    val temp = list[idx]
+                                    list[idx] = list[idx - 1]
+                                    list[idx - 1] = temp
+                                    localStreamsList = list
+                                    onSaveEpisodeStreams(ep.id, list)
+                                    onSaveCustomEdits(list, meta)
+                                }
+                            },
+                            onMoveDown = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx >= 0 && idx < list.size - 1) {
+                                    val temp = list[idx]
+                                    list[idx] = list[idx + 1]
+                                    list[idx + 1] = temp
+                                    localStreamsList = list
+                                    onSaveEpisodeStreams(ep.id, list)
+                                    onSaveCustomEdits(list, meta)
+                                }
+                            },
+                            onRemoveStream = { s ->
+                                localStreamsList = localStreamsList.filter { it != s }.toMutableList()
+                                onRemoveStream(s, ep.id)
+                                onSaveEpisodeStreams(ep.id, localStreamsList)
+                                onSaveCustomEdits(localStreamsList, meta)
+                            },
+                            onOpenVerification = { url -> verificationUrl = url }
+                        )
                     }
                 }
             } else {
@@ -845,6 +888,13 @@ fun MovieDetailSheet(
                                         localEpisodesList = localEpisodesList.filter { it.id != ep.id }.toMutableList()
                                         Toast.makeText(context, "${ep.name} removed", Toast.LENGTH_SHORT).show()
                                     },
+                                    onUpdateThumbnail = { newThumb ->
+                                        localEpisodesList = localEpisodesList.map { item ->
+                                            if (item.id == ep.id || (item.season == ep.season && item.number == ep.number)) {
+                                                item.copy(thumbnail = newThumb)
+                                            } else item
+                                        }.toMutableList()
+                                    },
                                     onClick = {
                                         onSelectEpisode(ep)
                                         activeEpisodeDetail = ep
@@ -930,60 +980,126 @@ fun MovieDetailSheet(
                             }
                         }
 
-                        // Streams list for Movie
-                        if (detailState.isLoadingStreams && detailState.streams.isEmpty()) {
-                            item {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .height(100.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    CircularProgressIndicator(color = MaterialTheme.colorScheme.primary, strokeWidth = 2.5.dp)
+                    // Three Provider Categories for Movie (vanishes when empty unless in edit mode)
+                    if (p1Streams.isNotEmpty() || isEditingProviders) {
+                        renderProviderSection(
+                            categoryTitle = "Provider 1",
+                            streams = p1Streams,
+                            allStreams = localStreamsList,
+                            isLoading = detailState.isLoadingStreams,
+                            titleText = meta.name,
+                            context = context,
+                            isEditingProviders = isEditingProviders,
+                            onMoveUp = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx > 0) {
+                                    val temp = list[idx]
+                                    list[idx] = list[idx - 1]
+                                    list[idx - 1] = temp
+                                    localStreamsList = list
+                                    onSaveCustomEdits(list, meta)
                                 }
-                            }
-                        } else if (localStreamsList.isEmpty() && !detailState.isLoadingStreams) {
-                            item {
-                                Box(
-                                    modifier = Modifier
-                                        .fillMaxWidth()
-                                        .padding(horizontal = 24.dp, vertical = 20.dp),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text("No direct stream links found for this movie.", fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                            },
+                            onMoveDown = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx >= 0 && idx < list.size - 1) {
+                                    val temp = list[idx]
+                                    list[idx] = list[idx + 1]
+                                    list[idx + 1] = temp
+                                    localStreamsList = list
+                                    onSaveCustomEdits(list, meta)
                                 }
-                            }
-                        } else {
-                            itemsIndexed(
-                                items = localStreamsList,
-                                key = { idx, stream -> "${stream.streamerNumber}_${stream.name}_${stream.title}_$idx" }
-                            ) { idx, stream ->
-                                StreamSourceItemCard(
-                                    stream = stream,
-                                    badgeLabel = streamBadgeLabels.getOrElse(idx) { "" },
-                                    title = meta.name,
-                                    context = context,
-                                    isEditingProviders = isEditingProviders,
-                                    canMoveUp = idx > 0,
-                                    canMoveDown = idx < localStreamsList.size - 1,
-                                    onMoveUp = {
-                                        val list = localStreamsList.toMutableList()
-                                        val temp = list[idx]
-                                        list[idx] = list[idx - 1]
-                                        list[idx - 1] = temp
-                                        localStreamsList = list
-                                    },
-                                    onMoveDown = {
-                                        val list = localStreamsList.toMutableList()
-                                        val temp = list[idx]
-                                        list[idx] = list[idx + 1]
-                                        list[idx + 1] = temp
-                                        localStreamsList = list
-                                    },
-                                    onRemoveStream = onRemoveStream
-                                )
-                            }
-                        }
+                            },
+                            onRemoveStream = { s ->
+                                localStreamsList = localStreamsList.filter { it != s }.toMutableList()
+                                onRemoveStream(s, meta.displayImdbId)
+                                onSaveCustomEdits(localStreamsList, meta)
+                            },
+                            onOpenVerification = { url -> verificationUrl = url }
+                        )
+                    }
+
+                    if (p2Streams.isNotEmpty() || isEditingProviders) {
+                        renderProviderSection(
+                            categoryTitle = "Provider 2",
+                            streams = p2Streams,
+                            allStreams = localStreamsList,
+                            isLoading = detailState.isLoadingStreams,
+                            titleText = meta.name,
+                            context = context,
+                            isEditingProviders = isEditingProviders,
+                            onMoveUp = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx > 0) {
+                                    val temp = list[idx]
+                                    list[idx] = list[idx - 1]
+                                    list[idx - 1] = temp
+                                    localStreamsList = list
+                                    onSaveCustomEdits(list, meta)
+                                }
+                            },
+                            onMoveDown = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx >= 0 && idx < list.size - 1) {
+                                    val temp = list[idx]
+                                    list[idx] = list[idx + 1]
+                                    list[idx + 1] = temp
+                                    localStreamsList = list
+                                    onSaveCustomEdits(list, meta)
+                                }
+                            },
+                            onRemoveStream = { s ->
+                                localStreamsList = localStreamsList.filter { it != s }.toMutableList()
+                                onRemoveStream(s, meta.displayImdbId)
+                                onSaveCustomEdits(localStreamsList, meta)
+                            },
+                            onOpenVerification = { url -> verificationUrl = url }
+                        )
+                    }
+
+                    if (p3Streams.isNotEmpty() || isEditingProviders) {
+                        renderProviderSection(
+                            categoryTitle = "Provider 3",
+                            streams = p3Streams,
+                            allStreams = localStreamsList,
+                            isLoading = detailState.isLoadingStreams,
+                            titleText = meta.name,
+                            context = context,
+                            isEditingProviders = isEditingProviders,
+                            onMoveUp = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx > 0) {
+                                    val temp = list[idx]
+                                    list[idx] = list[idx - 1]
+                                    list[idx - 1] = temp
+                                    localStreamsList = list
+                                    onSaveCustomEdits(list, meta)
+                                }
+                            },
+                            onMoveDown = { stream ->
+                                val list = localStreamsList.toMutableList()
+                                val idx = list.indexOf(stream)
+                                if (idx >= 0 && idx < list.size - 1) {
+                                    val temp = list[idx]
+                                    list[idx] = list[idx + 1]
+                                    list[idx + 1] = temp
+                                    localStreamsList = list
+                                    onSaveCustomEdits(list, meta)
+                                }
+                            },
+                            onRemoveStream = { s ->
+                                localStreamsList = localStreamsList.filter { it != s }.toMutableList()
+                                onRemoveStream(s, meta.displayImdbId)
+                                onSaveCustomEdits(localStreamsList, meta)
+                            },
+                            onOpenVerification = { url -> verificationUrl = url }
+                        )
+                    }
                     }
                 }
             }
@@ -1048,9 +1164,14 @@ fun MovieDetailSheet(
                                 onClick = {
                                     val updatedMeta = meta.copy(
                                         poster = localSlideshowList.firstOrNull() ?: meta.poster,
-                                        background = localSlideshowList.getOrNull(1) ?: meta.background
+                                        background = localSlideshowList.getOrNull(1) ?: meta.background,
+                                        videos = localEpisodesList
                                     )
+                                    activeEpisodeDetail?.let { ep ->
+                                        onSaveEpisodeStreams(ep.id, localStreamsList)
+                                    }
                                     onSaveCustomEdits(localStreamsList, updatedMeta)
+                                    onSaveCustomEditsWithSlideshow(localStreamsList, updatedMeta, localSlideshowList)
                                     isEditingProviders = false
                                     Toast.makeText(context, "Layout, custom order & slideshow saved!", Toast.LENGTH_SHORT).show()
                                 },
@@ -1062,18 +1183,18 @@ fun MovieDetailSheet(
                                     tint = MaterialTheme.colorScheme.primary
                                 )
                             }
+                        }
 
-                            // 2. Restore Clock / History Icon (Screenshot 393)
-                            IconButton(
-                                onClick = { showRestoreConfirmDialog = true },
-                                modifier = Modifier.testTag("detail_restore_history_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Filled.History,
-                                    contentDescription = "Restore Original Format",
-                                    tint = Color.White
-                                )
-                            }
+                        // 2. Restore Clock / History Icon (Always visible beside pencil icon)
+                        IconButton(
+                            onClick = { showRestoreConfirmDialog = true },
+                            modifier = Modifier.testTag("detail_restore_history_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Filled.History,
+                                contentDescription = "Restore Original Format",
+                                tint = Color.White
+                            )
                         }
 
                         // 3. Pencil / Edit Button
@@ -1088,15 +1209,25 @@ fun MovieDetailSheet(
                             )
                         }
 
+                        var isLocallySaved by remember(meta.id, detailState.isSaved) { mutableStateOf(detailState.isSaved) }
+
                         // 4. Library / Save to Library Button (Far right hand side)
                         IconButton(
-                            onClick = { onToggleSave(meta) },
+                            onClick = {
+                                isLocallySaved = !isLocallySaved
+                                onToggleSave(meta)
+                                Toast.makeText(
+                                    context,
+                                    if (isLocallySaved) "Saved to Library" else "Removed from Library",
+                                    Toast.LENGTH_SHORT
+                                ).show()
+                            },
                             modifier = Modifier.testTag("detail_save_button")
                         ) {
                             Icon(
-                                imageVector = if (detailState.isSaved) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
-                                contentDescription = if (detailState.isSaved) "Saved to Library" else "Save to Library",
-                                tint = if (detailState.isSaved) MaterialTheme.colorScheme.primary else Color.White
+                                imageVector = if (isLocallySaved) Icons.Filled.Bookmark else Icons.Filled.BookmarkBorder,
+                                contentDescription = if (isLocallySaved) "Saved to Library" else "Save to Library",
+                                tint = if (isLocallySaved) MaterialTheme.colorScheme.primary else Color.White
                             )
                         }
                     }
@@ -1120,12 +1251,13 @@ fun MovieDetailSheet(
                 confirmButton = {
                     Button(
                         onClick = {
+                            onRestoreOriginal()
                             localSeasonsList = originalSeasons.toMutableList()
                             localEpisodesList = originalEpisodes.toMutableList()
                             localStreamsList = filteredStreams.toMutableList()
                             localSlideshowList = initialSlideshowList.toMutableList()
                             showRestoreConfirmDialog = false
-                            Toast.makeText(context, "Restored original seasons, episodes & format!", Toast.LENGTH_SHORT).show()
+                            Toast.makeText(context, "Restored original seasons, episodes & providers!", Toast.LENGTH_SHORT).show()
                         },
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
                     ) {
@@ -1145,8 +1277,11 @@ fun MovieDetailSheet(
                 onDismiss = { showAddProviderDialog = false },
                 onAdd = { newStream ->
                     onAddCustomStream(newStream)
-                    localStreamsList = (listOf(newStream) + localStreamsList).toMutableList()
+                    val updated = (listOf(newStream) + localStreamsList).toMutableList()
+                    localStreamsList = updated
+                    onSaveCustomEdits(updated, meta)
                     showAddProviderDialog = false
+                    Toast.makeText(context, "New stream provider added & saved!", Toast.LENGTH_SHORT).show()
                 }
             )
         }
@@ -1157,8 +1292,24 @@ fun MovieDetailSheet(
                 onDismiss = { showManageSlideshowDialog = false },
                 onSaveImages = { newList ->
                     localSlideshowList = newList.toMutableList()
+                    val updatedMeta = meta.copy(
+                        poster = newList.firstOrNull() ?: meta.poster,
+                        background = newList.getOrNull(1) ?: meta.background
+                    )
+                    onSaveCustomEdits(localStreamsList, updatedMeta)
                     showManageSlideshowDialog = false
-                    Toast.makeText(context, "Slideshow images updated!", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(context, "Slideshow images updated & saved!", Toast.LENGTH_SHORT).show()
+                }
+            )
+        }
+
+        if (verificationUrl != null) {
+            VerificationBrowserDialog(
+                initialUrl = verificationUrl!!,
+                onDismiss = { verificationUrl = null },
+                onVerified = { resolved ->
+                    verificationUrl = null
+                    executeStreamPlayback(context, resolved)
                 }
             )
         }
@@ -1176,10 +1327,20 @@ private fun VerticalEpisodeRowCard(
     onMoveUp: () -> Unit = {},
     onMoveDown: () -> Unit = {},
     onRemoveEpisode: () -> Unit = {},
+    onUpdateThumbnail: (String) -> Unit = {},
     onClick: () -> Unit
 ) {
     val context = LocalContext.current
     val imageModel = episode.thumbnail ?: fallbackBackdrop
+
+    val episodeImagePickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            onUpdateThumbnail(uri.toString())
+            Toast.makeText(context, "Episode ${episode.number} image updated!", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     Card(
         modifier = Modifier
@@ -1242,6 +1403,36 @@ private fun VerticalEpisodeRowCard(
                         color = Color.White,
                         modifier = Modifier.padding(horizontal = 4.dp, vertical = 2.dp)
                     )
+                }
+
+                // In Edit Mode: Show + icon overlay to upload local image as episode poster (Screenshot 417)
+                if (isEditingMode) {
+                    Surface(
+                        shape = CircleShape,
+                        color = Color(0xDD000000),
+                        border = androidx.compose.foundation.BorderStroke(1.2.dp, MaterialTheme.colorScheme.primary),
+                        shadowElevation = 6.dp,
+                        modifier = Modifier
+                            .align(Alignment.Center)
+                            .size(34.dp)
+                            .clickable {
+                                episodeImagePickerLauncher.launch(
+                                    androidx.activity.result.PickVisualMediaRequest(
+                                        androidx.activity.result.contract.ActivityResultContracts.PickVisualMedia.ImageOnly
+                                    )
+                                )
+                            }
+                            .testTag("upload_episode_image_${episode.number}")
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Icon(
+                                imageVector = Icons.Filled.Add,
+                                contentDescription = "Upload Episode Image",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                        }
+                    }
                 }
             }
 
@@ -1315,10 +1506,103 @@ private fun VerticalEpisodeRowCard(
     }
 }
 
+private fun androidx.compose.foundation.lazy.LazyListScope.renderProviderSection(
+    categoryTitle: String,
+    streams: List<StremioStream>,
+    allStreams: List<StremioStream>,
+    isLoading: Boolean,
+    titleText: String,
+    context: Context,
+    isEditingProviders: Boolean,
+    onMoveUp: (StremioStream) -> Unit,
+    onMoveDown: (StremioStream) -> Unit,
+    onRemoveStream: (StremioStream) -> Unit,
+    onOpenVerification: (String) -> Unit
+) {
+    item(key = "title_${categoryTitle}_$titleText") {
+        Text(
+            text = categoryTitle,
+            fontSize = 15.sp,
+            fontWeight = FontWeight.Bold,
+            color = Color.White,
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(start = 16.dp, end = 16.dp, top = 14.dp, bottom = 4.dp)
+        )
+    }
+
+    if (streams.isEmpty() && isLoading) {
+        item(key = "loading_${categoryTitle}_$titleText") {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(vertical = 12.dp),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator(
+                    color = MaterialTheme.colorScheme.primary,
+                    strokeWidth = 2.dp,
+                    modifier = Modifier.size(24.dp)
+                )
+            }
+        }
+    } else if (streams.isEmpty() && !isLoading) {
+        item(key = "empty_${categoryTitle}_$titleText") {
+            Text(
+                text = "No add-on stream links found under $categoryTitle.",
+                fontSize = 11.5.sp,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp)
+            )
+        }
+    } else {
+        itemsIndexed(
+            items = streams,
+            key = { idx, stream -> "${stream.streamerNumber}_${stream.name}_${stream.title}_${stream.playableUrl}_$idx" }
+        ) { _, stream ->
+            val overallIdx = allStreams.indexOf(stream)
+            StreamSourceItemCard(
+                stream = stream,
+                title = titleText,
+                context = context,
+                isEditingProviders = isEditingProviders,
+                canMoveUp = overallIdx > 0,
+                canMoveDown = overallIdx < allStreams.size - 1,
+                onMoveUp = { onMoveUp(stream) },
+                onMoveDown = { onMoveDown(stream) },
+                onRemoveStream = { onRemoveStream(stream) },
+                onOpenVerification = onOpenVerification
+            )
+        }
+
+        if (isLoading) {
+            item(key = "fetching_${categoryTitle}_$titleText") {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    CircularProgressIndicator(
+                        color = MaterialTheme.colorScheme.primary,
+                        strokeWidth = 2.dp,
+                        modifier = Modifier.size(16.dp)
+                    )
+                    Text(
+                        text = "Loading add-ons...",
+                        fontSize = 11.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun StreamSourceItemCard(
     stream: StremioStream,
-    badgeLabel: String = "",
     title: String,
     context: Context,
     isEditingProviders: Boolean = false,
@@ -1326,7 +1610,8 @@ private fun StreamSourceItemCard(
     canMoveDown: Boolean = false,
     onMoveUp: () -> Unit = {},
     onMoveDown: () -> Unit = {},
-    onRemoveStream: (StremioStream) -> Unit = {}
+    onRemoveStream: (StremioStream) -> Unit = {},
+    onOpenVerification: (String) -> Unit = {}
 ) {
     Card(
         modifier = Modifier
@@ -1348,74 +1633,61 @@ private fun StreamSourceItemCard(
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                    modifier = Modifier.weight(1f)
+                // Resolution / Quality Badge Only (e.g. 1080p FHD, 4K 2160p)
+                Surface(
+                    shape = RoundedCornerShape(4.dp),
+                    color = Color(0xFF0288D1)
                 ) {
-                    val addonColor = if (stream.streamerNumber == 1) Color(0xFF00897B) else Color(0xFF0288D1)
-                    val rawAddon = formatProviderDisplay(stream.addonSource)
-                    val formattedAddon = if (badgeLabel.isNotBlank()) "$rawAddon $badgeLabel" else rawAddon
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = addonColor
-                    ) {
-                        Text(
-                            text = formattedAddon,
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
-
-                    val sub = stream.subProvider?.let { formatProviderDisplay(it) }
-                    if (!sub.isNullOrBlank() && !sub.equals(formattedAddon, ignoreCase = true)) {
-                        Surface(
-                            shape = RoundedCornerShape(4.dp),
-                            color = Color(0xFF263238),
-                            border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF37474F))
-                        ) {
-                            Text(
-                                text = sub,
-                                color = Color(0xFF80CBC4),
-                                fontSize = 11.sp,
-                                fontWeight = FontWeight.SemiBold,
-                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                            )
-                        }
-                    }
-
-                    Surface(
-                        shape = RoundedCornerShape(4.dp),
-                        color = when {
-                            stream.cleanQuality.contains("4k", ignoreCase = true) || stream.cleanQuality.contains("2160p") -> CinemaRed
-                            stream.cleanQuality.contains("1080p") -> Color(0xFF0288D1)
-                            else -> Color(0xFF5E35B1)
-                        }
-                    ) {
-                        Text(
-                            text = stream.cleanQuality,
-                            color = Color.White,
-                            fontSize = 11.sp,
-                            fontWeight = FontWeight.Bold,
-                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                        )
-                    }
+                    Text(
+                        text = stream.cleanQuality.ifBlank { "1080p FHD" },
+                        color = Color.White,
+                        fontSize = 11.sp,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                    )
                 }
 
+                // Right Side Edit Controls: Up and Down arrow buttons beside the crossbar
                 if (isEditingProviders) {
-                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(2.dp)) {
-                        Column {
-                            if (canMoveUp) {
-                                IconButton(onClick = onMoveUp, modifier = Modifier.size(20.dp)) {
-                                    Icon(Icons.Filled.KeyboardArrowUp, contentDescription = "Move Up", tint = Color.LightGray, modifier = Modifier.size(16.dp))
-                                }
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (canMoveUp) Color(0xFF2D323F) else Color(0xFF1E2026),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (canMoveUp) Color(0xFF4C5366) else Color(0xFF2C2E36)),
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clickable(enabled = canMoveUp, onClick = onMoveUp)
+                                .testTag("provider_move_up_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Filled.KeyboardArrowUp,
+                                    contentDescription = "Move Up",
+                                    tint = if (canMoveUp) Color.White else Color.Gray,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
-                            if (canMoveDown) {
-                                IconButton(onClick = onMoveDown, modifier = Modifier.size(20.dp)) {
-                                    Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Move Down", tint = Color.LightGray, modifier = Modifier.size(16.dp))
-                                }
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = if (canMoveDown) Color(0xFF2D323F) else Color(0xFF1E2026),
+                            border = androidx.compose.foundation.BorderStroke(1.dp, if (canMoveDown) Color(0xFF4C5366) else Color(0xFF2C2E36)),
+                            modifier = Modifier
+                                .size(32.dp)
+                                .clickable(enabled = canMoveDown, onClick = onMoveDown)
+                                .testTag("provider_move_down_button")
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Filled.KeyboardArrowDown,
+                                    contentDescription = "Move Down",
+                                    tint = if (canMoveDown) Color.White else Color.Gray,
+                                    modifier = Modifier.size(20.dp)
+                                )
                             }
                         }
 
@@ -1423,15 +1695,16 @@ private fun StreamSourceItemCard(
                             shape = CircleShape,
                             color = CinemaRed,
                             modifier = Modifier
-                                .size(26.dp)
+                                .size(32.dp)
                                 .clickable { onRemoveStream(stream) }
+                                .testTag("remove_provider_cross_button")
                         ) {
                             Box(contentAlignment = Alignment.Center) {
                                 Icon(
                                     imageVector = Icons.Filled.Close,
                                     contentDescription = "Remove Provider",
                                     tint = Color.White,
-                                    modifier = Modifier.size(16.dp)
+                                    modifier = Modifier.size(18.dp)
                                 )
                             }
                         }
@@ -1439,15 +1712,74 @@ private fun StreamSourceItemCard(
                 }
             }
 
-            stream.description?.takeIf { it.isNotBlank() }?.let { desc ->
-                val cleanDesc = sanitizeStreamText(desc) ?: desc
+            // Stream Details (Single gray sentence only - no dark white title, no provider name clutter)
+            val desc = stream.description?.trim().orEmpty()
+                .replace("Direct Stream & Download Link", "", ignoreCase = true)
+                .replace("Direct Stream Link", "", ignoreCase = true)
+                .replace("Direct Stream", "", ignoreCase = true)
+                .trim(' ', '•', '-', ':')
+            val sentence = if (desc.isNotBlank()) {
+                desc
+            } else {
+                val t = stream.title?.trim().orEmpty()
+                val lines = t.lines().map { it.trim() }.filter { it.isNotBlank() }
+                if (lines.size > 1) {
+                    lines.drop(1).joinToString(" • ")
+                } else {
+                    val isGeneric = t.startsWith("MoviesDrives", ignoreCase = true) ||
+                            t.startsWith("MovieBox", ignoreCase = true) ||
+                            t.startsWith("VegaMovies", ignoreCase = true) ||
+                            t.startsWith("HDHub4u", ignoreCase = true) ||
+                            t.startsWith("HD Hub", ignoreCase = true) ||
+                            t.startsWith("PenguPlay", ignoreCase = true) ||
+                            t.startsWith("YAS", ignoreCase = true)
+                    if (isGeneric && (t.contains("1080p") || t.contains("720p") || t.contains("4K"))) {
+                        stream.cleanQuality
+                    } else t
+                }
+            }
+            if (sentence.isNotBlank()) {
                 Text(
-                    text = cleanDesc,
-                    fontSize = 11.sp,
+                    text = sentence,
+                    fontSize = 11.5.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 2,
+                    maxLines = 3,
                     overflow = TextOverflow.Ellipsis
                 )
+            }
+
+            val isVerificationLink = remember(stream.playableUrl) {
+                val u = stream.playableUrl.orEmpty().lowercase()
+                u.contains("hubcloud") || u.contains("verify") || u.contains("captcha") || u.contains("robot")
+            }
+            if (isVerificationLink) {
+                Surface(
+                    onClick = { onOpenVerification(stream.playableUrl ?: "") },
+                    shape = RoundedCornerShape(8.dp),
+                    color = Color(0xFF1E3A5F),
+                    border = androidx.compose.foundation.BorderStroke(1.dp, Color(0xFF2563EB)),
+                    modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Check,
+                            contentDescription = null,
+                            tint = Color(0xFF60A5FA),
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Solve Human / Robot Verification in Browser",
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = Color(0xFF93C5FD)
+                        )
+                    }
+                }
             }
 
             Row(
@@ -1460,7 +1792,11 @@ private fun StreamSourceItemCard(
                     onClick = {
                         val playable = stream.playableUrl
                         if (!playable.isNullOrBlank()) {
-                            executeStreamPlayback(context, playable)
+                            if (playable.contains("hubcloud") || playable.contains("verify") || playable.contains("captcha") || playable.contains("robot")) {
+                                onOpenVerification(playable)
+                            } else {
+                                executeStreamPlayback(context, playable)
+                            }
                         } else {
                             Toast.makeText(context, "Stream link not available", Toast.LENGTH_SHORT).show()
                         }
@@ -1563,12 +1899,26 @@ fun AddCustomProviderDialog(
     onDismiss: () -> Unit,
     onAdd: (StremioStream) -> Unit
 ) {
+    val context = LocalContext.current
     var isLocalFile by remember { mutableStateOf(false) }
     var providerName by remember { mutableStateOf("") }
     var urlOrPath by remember { mutableStateOf("") }
     var selectedResolution by remember { mutableStateOf("1080p FHD") }
     var fileSize by remember { mutableStateOf("2.1 GB") }
     var descriptionDetails by remember { mutableStateOf("BluRay, x264, Dual Audio") }
+
+    val videoPickerLauncher = rememberLauncherForActivityResult(
+        contract = androidx.activity.result.contract.ActivityResultContracts.GetContent()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            urlOrPath = uri.toString()
+            val candidateName = uri.lastPathSegment?.substringAfterLast('/') ?: "Local Video"
+            if (providerName.isBlank()) {
+                providerName = candidateName.take(30)
+            }
+            Toast.makeText(context, "Selected video file: $candidateName", Toast.LENGTH_SHORT).show()
+        }
+    }
 
     AlertDialog(
         onDismissRequest = onDismiss,
@@ -1622,9 +1972,48 @@ fun AddCustomProviderDialog(
                     value = urlOrPath,
                     onValueChange = { urlOrPath = it },
                     label = { Text(if (isLocalFile) "Video File Path (e.g. /storage/...)" else "Stream URL (http://...)") },
+                    trailingIcon = {
+                        if (isLocalFile) {
+                            IconButton(
+                                onClick = { videoPickerLauncher.launch("video/*") },
+                                modifier = Modifier.testTag("pick_video_plus_icon")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Filled.Add,
+                                    contentDescription = "Pick Video from Storage",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
+                            }
+                        }
+                    },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth()
                 )
+
+                if (isLocalFile) {
+                    Button(
+                        onClick = { videoPickerLauncher.launch("video/*") },
+                        shape = RoundedCornerShape(8.dp),
+                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primaryContainer),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("choose_video_storage_button")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Filled.Add,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "Choose Local Video File (+)",
+                            fontSize = 11.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    }
+                }
 
                 Row(
                     modifier = Modifier.fillMaxWidth(),
@@ -1854,6 +2243,79 @@ fun ManageSlideshowImagesDialog(
                 colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
             ) {
                 Text("Apply Images", fontWeight = FontWeight.Bold)
+            }
+        },
+        dismissButton = {
+            OutlinedButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@Composable
+fun VerificationBrowserDialog(
+    initialUrl: String,
+    onDismiss: () -> Unit,
+    onVerified: (String) -> Unit
+) {
+    var currentUrl by remember { mutableStateOf(initialUrl) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text("Provider Verification (HD Hub / Pingu / YAS)", fontWeight = FontWeight.Bold, fontSize = 15.sp)
+                IconButton(onClick = onDismiss) {
+                    Icon(Icons.Filled.Close, contentDescription = "Close", tint = CinemaRed)
+                }
+            }
+        },
+        text = {
+            Box(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(420.dp)
+                    .clip(RoundedCornerShape(8.dp))
+                    .background(Color.White)
+            ) {
+                androidx.compose.ui.viewinterop.AndroidView(
+                    factory = { ctx ->
+                        android.webkit.WebView(ctx).apply {
+                            settings.javaScriptEnabled = true
+                            settings.domStorageEnabled = true
+                            settings.userAgentString = "Mozilla/5.0 (Linux; Android 14; Mobile) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Mobile Safari/537.36"
+                            webViewClient = object : android.webkit.WebViewClient() {
+                                override fun onPageFinished(view: android.webkit.WebView?, url: String?) {
+                                    super.onPageFinished(view, url)
+                                    if (url != null) {
+                                        currentUrl = url
+                                        if (url.contains(".mp4") || url.contains(".m3u8") || url.contains("drive.google.com") || url.contains("playable")) {
+                                            onVerified(url)
+                                        }
+                                    }
+                                }
+                            }
+                            loadUrl(initialUrl)
+                        }
+                    },
+                    modifier = Modifier.fillMaxSize()
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    onVerified(currentUrl)
+                    onDismiss()
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary)
+            ) {
+                Text("Use Resolved Link", fontWeight = FontWeight.Bold)
             }
         },
         dismissButton = {

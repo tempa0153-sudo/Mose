@@ -40,6 +40,7 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.CloudDone
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.Edit
 import androidx.compose.material.icons.filled.FolderShared
 import androidx.compose.material.icons.filled.Palette
 import androidx.compose.material.icons.filled.Person
@@ -85,7 +86,8 @@ import java.io.File
 fun ProfileDialog(
     userProfile: UserProfile,
     preferences: UserPreferences,
-    onDismiss: () -> Unit
+    onDismiss: () -> Unit,
+    onEnterHomeEditMode: () -> Unit = {}
 ) {
     val context = LocalContext.current
     var nameInput by remember { mutableStateOf(userProfile.name) }
@@ -668,13 +670,16 @@ fun ProfileDialog(
                         }
 
                         Button(
-                            onClick = { showHomeScreenEditor = true },
+                            onClick = {
+                                onEnterHomeEditMode()
+                                onDismiss()
+                            },
                             shape = RoundedCornerShape(10.dp),
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("edit_home_screen_button")
                         ) {
-                            Icon(imageVector = Icons.Filled.CameraAlt, contentDescription = null, modifier = Modifier.size(16.dp))
+                            Icon(imageVector = Icons.Filled.Edit, contentDescription = null, modifier = Modifier.size(16.dp))
                             Spacer(modifier = Modifier.width(6.dp))
                             Text("Edit Home Screen Layout & 20 Poster Placeholders", fontSize = 12.sp, fontWeight = FontWeight.Bold)
                         }

@@ -35,6 +35,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
@@ -62,27 +63,30 @@ fun HeroBanner(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .height(240.dp)
-            .clip(RoundedCornerShape(bottomStart = 20.dp, bottomEnd = 20.dp))
+            .height(330.dp)
+            .clip(RoundedCornerShape(bottomStart = 16.dp, bottomEnd = 16.dp))
             .clickable { currentMovie?.let { onClickMovie(it) } }
             .testTag("hero_banner_container")
     ) {
 
-        // Background Hero Poster with Crossfade drawing edge-to-edge behind Android notification panel
+        // Background Hero Poster - full-bleed HD banner filling the slideshow dimensions (Screenshot 171)
         Crossfade(
             targetState = currentMovie,
-            animationSpec = tween(durationMillis = 600, easing = androidx.compose.animation.core.FastOutSlowInEasing),
+            animationSpec = tween(durationMillis = 400, easing = androidx.compose.animation.core.FastOutSlowInEasing),
             label = "hero_crossfade"
         ) { movie ->
-            val imageUrl = movie?.background ?: movie?.poster
+            val imageUrl = movie?.background?.takeIf { it.isNotBlank() }
+                ?: if (movie?.displayImdbId?.startsWith("tt") == true) "https://images.metahub.space/background/medium/${movie.displayImdbId}/img"
+                else movie?.poster
             if (!imageUrl.isNullOrBlank()) {
                 val heroImageRequest = remember(imageUrl) {
-                    buildOptimizedImageRequest(context, imageUrl, 720, 1080)
+                    buildOptimizedImageRequest(context, imageUrl, width = 960, height = 540, enableCrossfade = false)
                 }
                 AsyncImage(
                     model = heroImageRequest,
                     contentDescription = movie?.name,
                     contentScale = ContentScale.Crop,
+                    alignment = Alignment.Center,
                     modifier = Modifier.fillMaxSize()
                 )
             } else {

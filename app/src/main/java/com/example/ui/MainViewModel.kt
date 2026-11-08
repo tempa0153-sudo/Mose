@@ -13,12 +13,15 @@ import com.example.data.pref.UserProfile
 import com.example.data.remote.StremioClient
 import com.example.data.repository.CategorySection
 import com.example.data.repository.MediaRepository
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.onCompletion
 import kotlinx.coroutines.launch
 
 sealed class Screen {
@@ -82,6 +85,9 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     private val _isProfileOpen = MutableStateFlow(false)
     val isProfileOpen: StateFlow<Boolean> = _isProfileOpen.asStateFlow()
 
+    private val _isHomeEditMode = MutableStateFlow(false)
+    val isHomeEditMode: StateFlow<Boolean> = _isHomeEditMode.asStateFlow()
+
     val userProfile: StateFlow<UserProfile> = preferences.userProfile
 
     private var heroShuffleJob: Job? = null
@@ -116,8 +122,13 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 )
             }
             try {
+                val startTime = System.currentTimeMillis()
                 repository.getCategoriesFlow(forceRefresh = forceRefresh).collect { categories ->
                     val heroCandidates = repository.build20HeroList(categories)
+                    val elapsedTime = System.currentTimeMillis() - startTime
+                    if (elapsedTime < 2000) {
+                        delay(2000 - elapsedTime)
+                    }
 
                     _homeState.value = _homeState.value.copy(
                         isLoading = false,
@@ -217,16 +228,30 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _savedMedia.value = newList
         viewModelScope.launch {
             repository.updateCustomOrder(newList)
-            if (userProfile.value.librarySortOrder != "custom") {
-                preferences.updateLibrarySortOrder("custom")
+            val currentSort = userProfile.value.librarySortOrder
+            val customSort = when {
+                currentSort.startsWith("date_asc") -> "date_asc_custom"
+                currentSort.startsWith("title_asc") -> "title_asc_custom"
+                currentSort.startsWith("rating_desc") -> "rating_desc_custom"
+                currentSort.startsWith("rating_asc") -> "rating_asc_custom"
+                else -> "date_desc_custom"
             }
+            preferences.updateLibrarySortOrder(customSort)
         }
     }
 
     fun saveLibraryLayoutAndOrder() {
         val current = _savedMedia.value
         viewModelScope.launch {
-            preferences.updateLibrarySortOrder("custom")
+            val currentSort = userProfile.value.librarySortOrder
+            val customSort = when {
+                currentSort.startsWith("date_asc") -> "date_asc_custom"
+                currentSort.startsWith("title_asc") -> "title_asc_custom"
+                currentSort.startsWith("rating_desc") -> "rating_desc_custom"
+                currentSort.startsWith("rating_asc") -> "rating_asc_custom"
+                else -> "date_desc_custom"
+            }
+            preferences.updateLibrarySortOrder(customSort)
             repository.updateCustomOrder(current)
         }
     }
@@ -237,6 +262,17 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
             val item = current.removeAt(fromIndex)
             current.add(toIndex, item)
             _savedMedia.value = current
+            val currentSort = userProfile.value.librarySortOrder
+            val customSort = when {
+                currentSort.startsWith("date_asc") -> "date_asc_custom"
+                currentSort.startsWith("title_asc") -> "title_asc_custom"
+                currentSort.startsWith("rating_desc") -> "rating_desc_custom"
+                currentSort.startsWith("rating_asc") -> "rating_asc_custom"
+                else -> "date_desc_custom"
+            }
+            if (currentSort != customSort) {
+                preferences.updateLibrarySortOrder(customSort)
+            }
             viewModelScope.launch {
                 repository.updateCustomOrder(current)
             }
@@ -250,78 +286,99 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
     }
 
     fun openMovieDetail(meta: StremioCatalogMeta) {
+        val customMeta = repository.getCustomMeta(meta.displayImdbId) 
+            ?: repository.getCustomMeta(meta.id) 
+            ?: repository.getCustomMetaByName(meta.name)
         val cached = repository.getCachedMovieDetails(meta.displayImdbId)
-        val initialMeta = cached ?: meta
+        val initialMeta = customMeta ?: cached ?: meta
         val isSeries = initialMeta.type.equals("series", ignoreCase = true)
         val initialSeason = if (isSeries) initialMeta.seasons.firstOrNull() ?: 1 else 1
-        val initialEpisode = if (isSeries) initialMeta.getEpisodesForSeason(initialSeason).firstOrNull() else null
+        val initialEpisode = if (isSeries) {
+            initialMeta.getEpisodesForSeason(initialSeason).firstOrNull()
+                ?: EpisodeItem(
+                    id = "${initialMeta.displayImdbId}:$initialSeason:1",
+                    name = "Episode 1",
+                    season = initialSeason,
+                    number = 1,
+                    overview = initialMeta.description,
+                    thumbnail = initialMeta.poster ?: initialMeta.background,
+                    released = initialMeta.year
+                )
+        } else null
 
         _detailState.value = DetailUiState(
             meta = initialMeta,
-            isLoadingDetails = cached == null,
-            isLoadingStreams = !isSeries || initialEpisode != null,
+            isLoadingDetails = cached == null && customMeta == null,
+            isLoadingStreams = true,
             isTrailerMuted = userProfile.value.trailerMuted,
             selectedSeason = initialSeason,
             selectedEpisode = initialEpisode
         )
 
         viewModelScope.launch {
-            repository.isSaved(meta.displayImdbId).collectLatest { saved ->
+            repository.isSaved(meta.id, meta.displayImdbId, meta.name).collectLatest { saved ->
                 _detailState.value = _detailState.value.copy(isSaved = saved)
             }
         }
 
-        if (initialMeta.allTrailerIds.isEmpty()) {
-            viewModelScope.launch {
-                val resolvedId = repository.resolveTrailerId(initialMeta)
-                if (!resolvedId.isNullOrBlank() && _detailState.value.meta?.id == initialMeta.id) {
-                    val current = _detailState.value.meta
-                    if (current != null && current.allTrailerIds.isEmpty()) {
-                        val withTrailer = current.copy(
-                            trailers = listOf(com.example.data.model.TrailerItem(source = resolvedId, type = "Trailer"))
+        // 1. START FETCHING STREAMS IMMEDIATELY ON THE VERY FIRST CLICK!
+        if (isSeries) {
+            if (initialEpisode != null) {
+                fetchStreamsForEpisode(initialEpisode)
+            }
+        } else {
+            fetchStreamsForMovie(initialMeta.displayImdbId)
+        }
+
+        // 2. Fetch Cinemeta series/movie enriched details concurrently in background
+        viewModelScope.launch(Dispatchers.IO) {
+            val enriched = repository.getMovieDetails(meta.type, meta.displayImdbId)
+            val updatedMeta = enriched.getOrNull()
+            if (updatedMeta != null) {
+                val finalMeta = customMeta?.let { custom ->
+                    updatedMeta.copy(
+                        poster = custom.poster ?: updatedMeta.poster,
+                        background = custom.background ?: updatedMeta.background,
+                        videos = custom.videos ?: updatedMeta.videos
+                    )
+                } ?: updatedMeta
+
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    if (_detailState.value.meta?.displayImdbId == meta.displayImdbId) {
+                        val currentEp = _detailState.value.selectedEpisode
+                        val updatedEpisodes = finalMeta.getEpisodesForSeason(_detailState.value.selectedSeason)
+                        val matchingEp = updatedEpisodes.firstOrNull { it.number == currentEp?.number }
+                            ?: updatedEpisodes.firstOrNull() ?: currentEp
+
+                        _detailState.value = _detailState.value.copy(
+                            meta = finalMeta,
+                            isLoadingDetails = false,
+                            selectedEpisode = matchingEp
                         )
-                        _detailState.value = _detailState.value.copy(meta = withTrailer)
                     }
+                }
+            } else {
+                kotlinx.coroutines.withContext(Dispatchers.Main) {
+                    _detailState.value = _detailState.value.copy(isLoadingDetails = false)
                 }
             }
         }
 
-        viewModelScope.launch {
-            val enriched = repository.getMovieDetails(meta.type, meta.displayImdbId)
-            var updatedMeta = enriched.getOrNull() ?: meta
-            if (updatedMeta.allTrailerIds.isEmpty()) {
-                val resolvedId = repository.resolveTrailerId(updatedMeta)
+        // 3. Resolve Trailer asynchronously in background - NEVER blocks stream fetching or UI
+        viewModelScope.launch(Dispatchers.IO) {
+            if (initialMeta.allTrailerIds.isEmpty()) {
+                val resolvedId = repository.resolveTrailerId(initialMeta)
                 if (!resolvedId.isNullOrBlank()) {
-                    updatedMeta = updatedMeta.copy(
-                        trailers = listOf(com.example.data.model.TrailerItem(source = resolvedId, type = "Trailer"))
-                    )
+                    kotlinx.coroutines.withContext(Dispatchers.Main) {
+                        val current = _detailState.value.meta
+                        if (current != null && current.displayImdbId == initialMeta.displayImdbId && current.allTrailerIds.isEmpty()) {
+                            val withTrailer = current.copy(
+                                trailers = listOf(com.example.data.model.TrailerItem(source = resolvedId, type = "Trailer"))
+                            )
+                            _detailState.value = _detailState.value.copy(meta = withTrailer)
+                        }
+                    }
                 }
-            }
-
-            if (isSeries) {
-                val availableSeasons = updatedMeta.seasons
-                val initialSeason = availableSeasons.firstOrNull() ?: 1
-                val episodes = updatedMeta.getEpisodesForSeason(initialSeason)
-                val initialEpisode = episodes.firstOrNull()
-
-                _detailState.value = _detailState.value.copy(
-                    meta = updatedMeta,
-                    isLoadingDetails = false,
-                    selectedSeason = initialSeason,
-                    selectedEpisode = initialEpisode
-                )
-
-                if (initialEpisode != null) {
-                    fetchStreamsForEpisode(initialEpisode)
-                } else {
-                    _detailState.value = _detailState.value.copy(isLoadingStreams = false)
-                }
-            } else {
-                _detailState.value = _detailState.value.copy(
-                    meta = updatedMeta,
-                    isLoadingDetails = false
-                )
-                fetchStreamsForMovie(updatedMeta.displayImdbId)
             }
         }
     }
@@ -333,12 +390,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isLoadingStreams = true,
                 streams = emptyList()
             )
-            repository.getStreamsProgressive("movie", id).collect { progressiveStreams ->
-                _detailState.value = _detailState.value.copy(
-                    streams = progressiveStreams,
-                    isLoadingStreams = false
-                )
-            }
+            repository.getStreamsProgressive("movie", id)
+                .onCompletion {
+                    _detailState.value = _detailState.value.copy(isLoadingStreams = false)
+                }
+                .collect { progressiveStreams ->
+                    _detailState.value = _detailState.value.copy(
+                        streams = progressiveStreams
+                    )
+                }
         }
     }
 
@@ -349,12 +409,15 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
                 isLoadingStreams = true,
                 streams = emptyList()
             )
-            repository.getStreamsProgressive("series", episode.id).collect { progressiveStreams ->
-                _detailState.value = _detailState.value.copy(
-                    streams = progressiveStreams,
-                    isLoadingStreams = false
-                )
-            }
+            repository.getStreamsProgressive("series", episode.id)
+                .onCompletion {
+                    _detailState.value = _detailState.value.copy(isLoadingStreams = false)
+                }
+                .collect { progressiveStreams ->
+                    _detailState.value = _detailState.value.copy(
+                        streams = progressiveStreams
+                    )
+                }
         }
     }
 
@@ -408,10 +471,186 @@ class MainViewModel(application: Application) : AndroidViewModel(application) {
         _detailState.value = _detailState.value.copy(streams = current)
     }
 
-    fun removeStream(stream: StremioStream) {
+    fun removeStream(stream: StremioStream, targetId: String? = null) {
+        val id = targetId ?: _detailState.value.selectedEpisode?.id ?: _detailState.value.meta?.displayImdbId ?: return
+        repository.hideStream(id, stream)
         val current = _detailState.value.streams.toMutableList()
         current.remove(stream)
         _detailState.value = _detailState.value.copy(streams = current)
+        repository.saveCustomStreamEdits(id, current)
+    }
+
+    fun saveEpisodeStreams(episodeId: String, streams: List<StremioStream>) {
+        viewModelScope.launch {
+            repository.saveCustomStreamEdits(episodeId, streams)
+            _detailState.value = _detailState.value.copy(streams = streams)
+        }
+    }
+
+    fun saveCustomEdits(
+        streams: List<StremioStream>,
+        meta: StremioCatalogMeta,
+        slideshowImages: List<String>? = null,
+        targetEpisodeId: String? = null
+    ) {
+        viewModelScope.launch {
+            val effectiveEpisodeId = targetEpisodeId ?: _detailState.value.selectedEpisode?.id
+            if (effectiveEpisodeId != null && effectiveEpisodeId.isNotBlank()) {
+                repository.saveCustomStreamEdits(effectiveEpisodeId, streams)
+            }
+            repository.saveCustomStreamEdits(meta.id, streams)
+            repository.saveCustomStreamEdits(meta.displayImdbId, streams)
+            repository.saveCustomMetaEdits(meta)
+            if (slideshowImages != null) {
+                repository.saveCustomSlideshow(meta.id, slideshowImages)
+                repository.saveCustomSlideshow(meta.displayImdbId, slideshowImages)
+            }
+            _detailState.value = _detailState.value.copy(
+                meta = meta,
+                streams = streams
+            )
+            // Immediately reflect in homeState heroMovies and categories
+            val updatedHeroes = _homeState.value.heroMovies.map {
+                if (it.id == meta.id || it.displayImdbId == meta.displayImdbId) {
+                    it.copy(
+                        name = meta.name,
+                        poster = meta.poster ?: it.poster,
+                        background = meta.background ?: it.background,
+                        description = meta.description ?: it.description
+                    )
+                } else it
+            }
+            val updatedCategories = _homeState.value.categories.map { cat ->
+                cat.copy(items = cat.items.map {
+                    if (it.id == meta.id || it.displayImdbId == meta.displayImdbId) {
+                        it.copy(
+                            name = meta.name,
+                            poster = meta.poster ?: it.poster,
+                            background = meta.background ?: it.background,
+                            description = meta.description ?: it.description
+                        )
+                    } else it
+                })
+            }
+            _homeState.value = _homeState.value.copy(
+                heroMovies = updatedHeroes,
+                categories = updatedCategories
+            )
+            if (db.savedMediaDao().exists(meta.id)) {
+                repository.saveMedia(meta, 0)
+            }
+        }
+    }
+
+    fun setHomeEditMode(enabled: Boolean) {
+        _isHomeEditMode.value = enabled
+    }
+
+    fun restoreMovieOriginal(id: String, displayImdbId: String) {
+        viewModelScope.launch {
+            repository.restoreMediaOriginal(id, displayImdbId)
+            val meta = _detailState.value.meta ?: return@launch
+            _detailState.value = _detailState.value.copy(
+                streams = emptyList(),
+                isLoadingStreams = true
+            )
+            if (meta.type.equals("series", ignoreCase = true)) {
+                val ep = _detailState.value.selectedEpisode ?: meta.videos?.firstOrNull()
+                if (ep != null) {
+                    fetchStreamsForEpisode(ep)
+                }
+            } else {
+                fetchStreamsForMovie(displayImdbId)
+            }
+        }
+    }
+
+    fun restoreHomeOriginal() {
+        viewModelScope.launch {
+            repository.restoreHomeOriginal()
+            loadCatalogData(forceRefresh = true)
+        }
+    }
+
+    fun moveCategoryMovie(categoryId: String, fromIndex: Int, toIndex: Int) {
+        val updatedCategories = _homeState.value.categories.map { cat ->
+            if (cat.id == categoryId) {
+                val list = cat.items.toMutableList()
+                if (fromIndex in list.indices && toIndex in list.indices) {
+                    val item = list.removeAt(fromIndex)
+                    list.add(toIndex, item)
+                    cat.copy(items = list)
+                } else cat
+            } else cat
+        }
+        _homeState.value = _homeState.value.copy(categories = updatedCategories)
+    }
+
+    fun deleteCategoryMovie(categoryId: String, movieId: String) {
+        val updatedCategories = _homeState.value.categories.map { cat ->
+            if (cat.id == categoryId) {
+                cat.copy(items = cat.items.filterNot { it.id == movieId })
+            } else cat
+        }
+        _homeState.value = _homeState.value.copy(categories = updatedCategories)
+    }
+
+    fun addCategoryMovie(categoryId: String, movie: StremioCatalogMeta) {
+        val updatedCategories = _homeState.value.categories.map { cat ->
+            if (cat.id == categoryId) {
+                val list = cat.items.toMutableList()
+                list.add(0, movie)
+                cat.copy(items = list)
+            } else cat
+        }
+        _homeState.value = _homeState.value.copy(categories = updatedCategories)
+    }
+
+    fun editCategoryMovie(categoryId: String, movieId: String, updatedMovie: StremioCatalogMeta) {
+        val updatedCategories = _homeState.value.categories.map { cat ->
+            if (cat.id == categoryId) {
+                cat.copy(items = cat.items.map { if (it.id == movieId) updatedMovie else it })
+            } else cat
+        }
+        _homeState.value = _homeState.value.copy(categories = updatedCategories)
+    }
+
+    fun shuffleCategoryMovies(categoryId: String) {
+        val updatedCategories = _homeState.value.categories.map { cat ->
+            if (cat.id == categoryId) {
+                cat.copy(items = cat.items.shuffled())
+            } else cat
+        }
+        _homeState.value = _homeState.value.copy(categories = updatedCategories)
+    }
+
+    fun updateHeroMovies(newHeroes: List<StremioCatalogMeta>) {
+        _homeState.value = _homeState.value.copy(heroMovies = newHeroes)
+    }
+
+    fun updateHeroMovieImage(hero: StremioCatalogMeta, newImageUrl: String) {
+        viewModelScope.launch(Dispatchers.IO) {
+            val updated = repository.saveHeroCustomImage(hero, newImageUrl)
+            val currentHeroes = _homeState.value.heroMovies.map {
+                if (it.id == hero.id || it.name.equals(hero.name, ignoreCase = true)) updated else it
+            }
+            repository.saveCustomHomeHeroes(currentHeroes)
+            val updatedCategories = repository.getCustomHomeCategories() ?: _homeState.value.categories
+            kotlinx.coroutines.withContext(Dispatchers.Main) {
+                _homeState.value = _homeState.value.copy(
+                    heroMovies = currentHeroes,
+                    categories = updatedCategories
+                )
+            }
+        }
+    }
+
+    fun saveHomeCustomizations() {
+        val cats = _homeState.value.categories
+        val heroes = _homeState.value.heroMovies
+        repository.saveCustomHomeCategories(cats)
+        repository.saveCustomHomeHeroes(heroes)
+        _isHomeEditMode.value = false
     }
 
     fun saveCustomMedia(

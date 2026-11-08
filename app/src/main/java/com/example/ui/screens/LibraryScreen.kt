@@ -32,6 +32,7 @@ import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.BookmarkBorder
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
@@ -123,7 +124,7 @@ fun LibraryScreen(
             else -> GridTileSize.COMPACT
         }
     }
-    val isCustomOrder = sortOrder == "custom"
+    val isCustomOrder = sortOrder.endsWith("_custom") || sortOrder == "custom"
 
     var hasStoragePermission by remember {
         mutableStateOf(
@@ -250,6 +251,8 @@ fun LibraryScreen(
                             modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
                         )
 
+                        val isDateDesc = sortOrder == "date_desc" || sortOrder == "date_desc_custom" || sortOrder == "custom"
+                        val isDateDescCustom = sortOrder == "date_desc_custom" || (sortOrder == "custom" && isDateDesc)
                         DropdownMenuItem(
                             text = {
                                 Row(
@@ -257,8 +260,18 @@ fun LibraryScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Date Added (Newest First)")
-                                    if (sortOrder == "date_desc") {
+                                    Column {
+                                        Text("Date Added (Newest First)", fontWeight = if (isDateDesc) FontWeight.Bold else FontWeight.Normal)
+                                        if (isDateDescCustom) {
+                                            Text(
+                                                text = "Custom Sorting Enabled",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    if (isDateDesc) {
                                         Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                     }
                                 }
@@ -270,6 +283,8 @@ fun LibraryScreen(
                             modifier = Modifier.testTag("sort_date_desc")
                         )
 
+                        val isDateAsc = sortOrder == "date_asc" || sortOrder == "date_asc_custom"
+                        val isDateAscCustom = sortOrder == "date_asc_custom"
                         DropdownMenuItem(
                             text = {
                                 Row(
@@ -277,8 +292,18 @@ fun LibraryScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Date Added (Oldest First)")
-                                    if (sortOrder == "date_asc") {
+                                    Column {
+                                        Text("Date Added (Oldest First)", fontWeight = if (isDateAsc) FontWeight.Bold else FontWeight.Normal)
+                                        if (isDateAscCustom) {
+                                            Text(
+                                                text = "Custom Sorting Enabled",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    if (isDateAsc) {
                                         Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                     }
                                 }
@@ -290,6 +315,8 @@ fun LibraryScreen(
                             modifier = Modifier.testTag("sort_date_asc")
                         )
 
+                        val isTitleAsc = sortOrder == "title_asc" || sortOrder == "title_asc_custom"
+                        val isTitleAscCustom = sortOrder == "title_asc_custom"
                         DropdownMenuItem(
                             text = {
                                 Row(
@@ -297,8 +324,18 @@ fun LibraryScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("Title (A to Z)")
-                                    if (sortOrder == "title_asc") {
+                                    Column {
+                                        Text("Title (A to Z)", fontWeight = if (isTitleAsc) FontWeight.Bold else FontWeight.Normal)
+                                        if (isTitleAscCustom) {
+                                            Text(
+                                                text = "Custom Sorting Enabled",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    if (isTitleAsc) {
                                         Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                     }
                                 }
@@ -310,6 +347,8 @@ fun LibraryScreen(
                             modifier = Modifier.testTag("sort_title_asc")
                         )
 
+                        val isRatingDesc = sortOrder == "rating_desc" || sortOrder == "rating_desc_custom"
+                        val isRatingDescCustom = sortOrder == "rating_desc_custom"
                         DropdownMenuItem(
                             text = {
                                 Row(
@@ -317,8 +356,18 @@ fun LibraryScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("IMDb Rating (Highest)")
-                                    if (sortOrder == "rating_desc") {
+                                    Column {
+                                        Text("IMDb Rating (Highest)", fontWeight = if (isRatingDesc) FontWeight.Bold else FontWeight.Normal)
+                                        if (isRatingDescCustom) {
+                                            Text(
+                                                text = "Custom Sorting Enabled",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    if (isRatingDesc) {
                                         Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                     }
                                 }
@@ -330,6 +379,8 @@ fun LibraryScreen(
                             modifier = Modifier.testTag("sort_rating_desc")
                         )
 
+                        val isRatingAsc = sortOrder == "rating_asc" || sortOrder == "rating_asc_custom"
+                        val isRatingAscCustom = sortOrder == "rating_asc_custom"
                         DropdownMenuItem(
                             text = {
                                 Row(
@@ -337,8 +388,18 @@ fun LibraryScreen(
                                     horizontalArrangement = Arrangement.SpaceBetween,
                                     verticalAlignment = Alignment.CenterVertically
                                 ) {
-                                    Text("IMDb Rating (Lowest)")
-                                    if (sortOrder == "rating_asc") {
+                                    Column {
+                                        Text("IMDb Rating (Lowest)", fontWeight = if (isRatingAsc) FontWeight.Bold else FontWeight.Normal)
+                                        if (isRatingAscCustom) {
+                                            Text(
+                                                text = "Custom Sorting Enabled",
+                                                fontSize = 10.5.sp,
+                                                fontWeight = FontWeight.Bold,
+                                                color = MaterialTheme.colorScheme.primary
+                                            )
+                                        }
+                                    }
+                                    if (isRatingAsc) {
                                         Icon(Icons.Filled.Check, null, tint = MaterialTheme.colorScheme.primary, modifier = Modifier.size(16.dp))
                                     }
                                 }
@@ -432,54 +493,6 @@ fun LibraryScreen(
             }
         }
 
-        if (!hasStoragePermission) {
-            Surface(
-                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.14f),
-                shape = RoundedCornerShape(10.dp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 4.dp)
-            ) {
-                Row(
-                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.SpaceBetween
-                ) {
-                    Row(
-                        modifier = Modifier.weight(1f),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Filled.FolderShared,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(20.dp)
-                        )
-                        Text(
-                            text = "Enable storage permission to save library configurations and cache offline.",
-                            fontSize = 11.sp,
-                            color = MaterialTheme.colorScheme.onBackground
-                        )
-                    }
-                    Button(
-                        onClick = {
-                            if (Build.VERSION.SDK_INT < 33) {
-                                permissionLauncher.launch(Manifest.permission.READ_EXTERNAL_STORAGE)
-                            } else {
-                                hasStoragePermission = true
-                            }
-                        },
-                        shape = RoundedCornerShape(8.dp),
-                        colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.primary),
-                        contentPadding = PaddingValues(horizontal = 10.dp, vertical = 4.dp)
-                    ) {
-                        Text("Allow", fontSize = 11.sp, fontWeight = FontWeight.Bold)
-                    }
-                }
-            }
-        }
-
         if (savedItems.isEmpty()) {
             Box(
                 modifier = Modifier
@@ -523,9 +536,9 @@ fun LibraryScreen(
             LazyVerticalGrid(
                 columns = if (currentGridSize.fixedColumns > 0) GridCells.Fixed(currentGridSize.fixedColumns) else GridCells.Adaptive(minSize = currentGridSize.minSize.dp),
                 state = gridState,
-                contentPadding = PaddingValues(start = 10.dp, end = 10.dp, bottom = 95.dp, top = 6.dp),
-                horizontalArrangement = Arrangement.spacedBy(8.dp),
-                verticalArrangement = Arrangement.spacedBy(10.dp),
+                contentPadding = PaddingValues(start = 5.dp, end = 5.dp, bottom = 95.dp, top = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(6.dp),
+                verticalArrangement = Arrangement.spacedBy(8.dp),
                 modifier = Modifier.fillMaxSize()
             ) {
                 itemsIndexed(localItems, key = { _, item -> item.id }) { index, item ->
@@ -541,7 +554,16 @@ fun LibraryScreen(
                         dragOffsetX = if (isBeingDragged) dragOffsetX else 0f,
                         dragOffsetY = if (isBeingDragged) dragOffsetY else 0f,
                         gridSize = currentGridSize,
-                        onEnableCustomOrder = { onSortOrderSelected("custom") },
+                        onEnableCustomOrder = {
+                            val nextSort = when {
+                                sortOrder.startsWith("date_asc") -> "date_asc_custom"
+                                sortOrder.startsWith("title_asc") -> "title_asc_custom"
+                                sortOrder.startsWith("rating_desc") -> "rating_desc_custom"
+                                sortOrder.startsWith("rating_asc") -> "rating_asc_custom"
+                                else -> "date_desc_custom"
+                            }
+                            onSortOrderSelected(nextSort)
+                        },
                         onDragStart = {
                             activeDraggingId = item.id
                             hoverTargetId = null
@@ -668,7 +690,7 @@ private fun DragDropGridCard(
                 translationY = dragOffsetY
                 scaleX = scale
                 scaleY = scale
-                shadowElevation = if (isBeingDragged) 24f else 2f
+                shadowElevation = if (isBeingDragged) 12f else 0f
             }
             .zIndex(if (isBeingDragged) 50f else if (isHoverTarget) 10f else 1f)
             .then(dragModifier)
@@ -683,19 +705,19 @@ private fun DragDropGridCard(
             isHoverTarget -> androidx.compose.foundation.BorderStroke(2.dp, Color(0xFF10B981))
             else -> null
         },
-        elevation = CardDefaults.cardElevation(defaultElevation = if (isBeingDragged) 12.dp else 2.dp)
+        elevation = CardDefaults.cardElevation(defaultElevation = if (isBeingDragged) 8.dp else 0.dp)
     ) {
         Column(modifier = Modifier.fillMaxWidth()) {
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .aspectRatio(2f / 3f)
+                    .aspectRatio(2f / 2.82f)
             ) {
                 if (!item.poster.isNullOrBlank()) {
                     AsyncImage(
                         model = ImageRequest.Builder(LocalContext.current)
                             .data(item.poster)
-                            .size(240, 360)
+                            .size(180, 255)
                             .allowRgb565(true)
                             .crossfade(false)
                             .memoryCachePolicy(coil.request.CachePolicy.ENABLED)
@@ -855,14 +877,15 @@ private fun AddMediaDialog(
     var perSeasonEpsRawMap by remember { mutableStateOf(mapOf(1 to "12")) }
 
     val posterPickerLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.GetContent()
-    ) { uri: android.net.Uri? ->
-        if (uri != null) {
-            posterUrl = uri.toString()
+        contract = ActivityResultContracts.PickMultipleVisualMedia(maxItems = 10)
+    ) { uris: List<android.net.Uri> ->
+        if (uris.isNotEmpty()) {
+            val firstUri = uris.first().toString()
+            posterUrl = firstUri
             if (backdropUrl.isBlank()) {
-                backdropUrl = uri.toString()
+                backdropUrl = firstUri
             }
-            Toast.makeText(context, "Poster image selected from storage", Toast.LENGTH_SHORT).show()
+            Toast.makeText(context, "${uris.size} poster image(s) selected!", Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -918,17 +941,36 @@ private fun AddMediaDialog(
                             if (backdropUrl.isBlank()) backdropUrl = it
                         },
                         label = { Text("Poster Image URL or Path") },
+                        trailingIcon = {
+                            IconButton(
+                                onClick = {
+                                    posterPickerLauncher.launch(
+                                        androidx.activity.result.PickVisualMediaRequest(
+                                            ActivityResultContracts.PickVisualMedia.ImageOnly
+                                        )
+                                    )
+                                }
+                            ) {
+                                Icon(Icons.Filled.Add, contentDescription = "Add Images", tint = MaterialTheme.colorScheme.primary)
+                            }
+                        },
                         singleLine = true,
                         modifier = Modifier.fillMaxWidth()
                     )
                     Button(
-                        onClick = { posterPickerLauncher.launch("image/*") },
+                        onClick = {
+                            posterPickerLauncher.launch(
+                                androidx.activity.result.PickVisualMediaRequest(
+                                    ActivityResultContracts.PickVisualMedia.ImageOnly
+                                )
+                            )
+                        },
                         shape = RoundedCornerShape(8.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.surfaceVariant)
                     ) {
-                        Icon(imageVector = Icons.Filled.FolderShared, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Icon(imageVector = Icons.Filled.Add, contentDescription = null, modifier = Modifier.size(16.dp), tint = MaterialTheme.colorScheme.primary)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("Pick Poster Image from Local Storage", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                        Text("Pick Poster Image(s) from Storage (+)", fontSize = 11.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
 

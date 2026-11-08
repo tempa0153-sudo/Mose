@@ -59,11 +59,39 @@ class AppDatabase private constructor(context: Context) : SQLiteOpenHelper(conte
             }
         }
 
+        override fun isSavedFlow(id: String, displayImdbId: String, title: String): Flow<Boolean> {
+            return changeTrigger.asStateFlow().map {
+                exists(id, displayImdbId, title)
+            }
+        }
+
         override suspend fun exists(id: String): Boolean = withContext(Dispatchers.IO) {
             val db = readableDatabase
             db.rawQuery("SELECT 1 FROM saved_media WHERE id = ? LIMIT 1", arrayOf(id)).use { cursor ->
                 cursor.moveToFirst()
             }
+        }
+
+        override suspend fun exists(id: String, displayImdbId: String, title: String): Boolean = withContext(Dispatchers.IO) {
+            val db = readableDatabase
+            val cleanTitle = title.trim()
+            val query = "SELECT 1 FROM saved_media WHERE id = ? OR id = ? OR (title = ? AND title != '') LIMIT 1"
+            db.rawQuery(query, arrayOf(id, displayImdbId, cleanTitle)).use { cursor ->
+                cursor.moveToFirst()
+            }
+        }
+
+        override suspend fun deleteByIdOrTitle(id: String, displayImdbId: String, title: String) = withContext(Dispatchers.IO) {
+            val db = writableDatabase
+            val cleanTitle = title.trim()
+            db.delete("saved_media", "id = ? OR id = ? OR (title = ? AND title != '')", arrayOf(id, displayImdbId, cleanTitle))
+            notifyDataChanged()
+        }
+
+        override suspend fun shiftCustomOrderIndices() = withContext(Dispatchers.IO) {
+            val db = writableDatabase
+            db.execSQL("UPDATE saved_media SET customOrderIndex = customOrderIndex + 1")
+            notifyDataChanged()
         }
 
         override suspend fun getCount(): Int = withContext(Dispatchers.IO) {
